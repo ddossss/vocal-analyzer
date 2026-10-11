@@ -64,6 +64,11 @@ label.inline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--
 .bar{height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
 .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--good),var(--warn) 75%,var(--bad));transition:width .06s}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:var(--muted)}
+.lvlbar{position:relative;overflow:visible}
+.lvlbar>i{border-radius:4px}
+.lvlbar>b{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text);opacity:.8;left:0;transition:left .1s}
+.lvlhint{font-size:12px;color:var(--muted);margin-top:8px;min-height:18px;text-align:left}
+.lvlhint.warn{color:var(--warn)}
 
 /* hold */
 .hold{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -164,7 +169,10 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       </div>
       <div class="level">
         <div class="row"><span>입력 레벨</span><span id="lvlTxt">— dBFS</span></div>
-        <div class="bar"><i id="lvl"></i></div>
+        <div class="bar lvlbar"><i id="lvl"></i><b id="gateMark" title="이 선보다 큰 소리만 분석해요"></b></div>
+        <div class="row" style="margin-top:12px"><span>마이크 감도</span><span id="gateTxt">—</span></div>
+        <input type="range" id="sens" min="0" max="100" value="70" style="width:100%">
+        <div class="lvlhint" id="lvlHint">마이크를 켜고 소리를 내 보세요</div>
       </div>
     </section>
 
@@ -325,6 +333,16 @@ let recentF = [], silentFrames = 0;
 let stableNote = null, stableCount = 0, maxF = null, minF = null;
 const history = new Array(HIST_LEN).fill(null);
 let fmtSmooth = 0;
+let gateDb = -58, gateRms = Math.pow(10, -58 / 20);
+let quietFrames = 0, unvoicedFrames = 0;
+const LVL_MIN = -70;   // level bar spans -70..0 dBFS
+
+function setGate() {
+  gateDb = -30 - (+$('sens').value) * 0.4;           // 0 -> -30dB (low sensitivity), 100 -> -70dB (high)
+  gateRms = Math.pow(10, gateDb / 20);
+  $('gateTxt').textContent = `${gateDb.toFixed(0)} dBFS 이상만 분석`;
+  $('gateMark').style.left = clamp((gateDb - LVL_MIN) / -LVL_MIN * 100, 0, 100) + '%';
+}
 
 /* ---------- helpers ---------- */
 const freqToMidi = f => 69 + 12 * Math.log2(f / A4);
@@ -357,7 +375,7 @@ function detectPitch(buf, sr) {
   let sum = 0;
   for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
   const rms = Math.sqrt(sum / buf.length);
-  if (rms < 0.008) return { f: 0, rms, clarity: 0 };
+  if (rms < gateRms) return { f: 0, rms, clarity: 0 };
 
   const tauMin = Math.floor(sr / 1400);   // ~F6
   const tauMax = Math.floor(sr / 65);     // ~C2
@@ -393,11 +411,21 @@ async function startMic() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setStatus('이 환경에서는 마이크를 쓸 수 없어요. Chrome 또는 https / localhost에서 열어 주세요.', true); return;
   }
+  if (!window.isSecureContext) {
+    setStatus('안전하지 않은 주소(http / content://)라 마이크를 쓸 수 없어요. https 주소로 열어 주세요.', true); return;
+  }
   try {
     ensureCtx();
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-    });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+    } catch (e1) {
+      if (e1 && (e1.name === 'OverconstrainedError' || e1.name === 'TypeError')) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });   // 일부 기기는 세부 설정을 거부
+      } else throw e1;
+    }
+    if (ctx.state !== 'running') await ctx.resume();
     source = ctx.createMediaStreamSource(stream);
     analyser = ctx.createAnalyser();
     analyser.fftSize = 4096;
@@ -410,10 +438,21 @@ async function startMic() {
     $('micBtn').textContent = '■ 마이크 중지'; $('micBtn').classList.add('stop');
     $('led').classList.add('on'); $('recBtn').disabled = false;
     $('recHint').textContent = '녹음 버튼을 누르면 지금 들리는 소리를 그대로 녹음해요.';
-    setStatus(`분석 중 · 샘플레이트 ${ctx.sampleRate}Hz`);
+    const dev = (stream.getAudioTracks()[0] || {}).label || '기본 마이크';
+    setStatus(`분석 중 · ${dev} · ${ctx.sampleRate}Hz`);
+    quietFrames = 0; unvoicedFrames = 0;
     loop();
   } catch (e) {
-    setStatus('마이크 권한이 거부되었거나 장치를 찾을 수 없어요. 브라우저 주소창의 마이크 권한을 확인해 주세요.', true);
+    const n = (e && e.name) || 'Error';
+    const msg = {
+      NotAllowedError: '마이크가 차단되어 있어요. 주소창 왼쪽 자물쇠 → 권한 → 마이크를 "허용"으로 바꾼 뒤 새로고침하세요. (안드로이드는 설정 → 앱 → Chrome → 권한 → 마이크도 확인)',
+      NotFoundError: '마이크 장치를 찾지 못했어요. 마이크가 연결되어 있는지 확인해 주세요.',
+      NotReadableError: '다른 앱이 마이크를 쓰고 있어요. 통화·녹음·화상회의 앱을 닫고 다시 시도해 주세요.',
+      SecurityError: '보안 설정 때문에 마이크를 쓸 수 없어요. https 주소인지 확인해 주세요.',
+      AbortError: '마이크를 시작하지 못했어요. 잠시 후 다시 시도해 주세요.'
+    }[n] || `마이크를 시작하지 못했어요 (${n}${e && e.message ? ': ' + e.message : ''})`;
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    setStatus(msg, true);
   }
 }
 function stopMic() {
@@ -427,6 +466,7 @@ function stopMic() {
   $('led').classList.remove('on'); $('recBtn').disabled = true;
   recentF = []; showPitch(0, false);
   $('lvl').style.width = '0%'; $('lvlTxt').textContent = '— dBFS';
+  $('lvlHint').textContent = '마이크를 켜고 소리를 내 보세요'; $('lvlHint').className = 'lvlhint';
   setStatus('중지됨 · 기록은 유지됩니다');
   drawSpectrum(0);
 }
@@ -449,10 +489,18 @@ function loop() {
 
   const r = detectPitch(timeBuf, ctx.sampleRate);
   const db = 20 * Math.log10(Math.max(r.rms, 1e-6));
-  $('lvl').style.width = clamp((db + 60) / 60 * 100, 0, 100) + '%';
+  $('lvl').style.width = clamp((db - LVL_MIN) / -LVL_MIN * 100, 0, 100) + '%';
   $('lvlTxt').textContent = (db < -90 ? '-∞' : db.toFixed(1)) + ' dBFS';
 
   const voiced = r.f > 0 && r.clarity > 0.8;
+  // 안내 문구: 입력이 너무 작거나, 소리는 있는데 음높이를 못 잡을 때
+  const hint = $('lvlHint');
+  if (db < -75) { quietFrames++; unvoicedFrames = 0; }
+  else { quietFrames = 0; unvoicedFrames = (r.rms >= gateRms && !voiced) ? unvoicedFrames + 1 : 0; }
+  if (quietFrames > 90) { hint.textContent = '마이크 입력이 거의 없어요. 마이크에 가까이 대고 소리를 내거나, 감도를 올려 보세요.'; hint.className = 'lvlhint warn'; }
+  else if (db < gateDb && db >= -75 && voiced === false && quietFrames === 0 && db > gateDb - 12) { hint.textContent = '소리가 작아서 무시되고 있어요. 감도를 오른쪽으로 올려 보세요.'; hint.className = 'lvlhint warn'; }
+  else if (unvoicedFrames > 60) { hint.textContent = '소리는 들리는데 음높이를 못 찾고 있어요. "아~" 하고 길게 일정한 음으로 불러 보세요.'; hint.className = 'lvlhint warn'; }
+  else { hint.textContent = voiced ? '인식 중' : '소리를 내 보세요'; hint.className = 'lvlhint'; }
   if (voiced) { recentF.push(r.f); if (recentF.length > 5) recentF.shift(); silentFrames = 0; }
   else if (++silentFrames > 8) recentF = [];
 
@@ -908,6 +956,9 @@ $('tap').onclick = () => {
 };
 
 /* ---------- init ---------- */
+try { const s = localStorage.getItem('va_sens'); if (s !== null) $('sens').value = s; } catch (e) {}
+$('sens').oninput = () => { setGate(); try { localStorage.setItem('va_sens', $('sens').value); } catch (e) {} };
+setGate();
 buildDots(); buildRootOptions(); setDefaultRoot(); updateVoiceRange(); resizeAll();
 })();
 </script>
