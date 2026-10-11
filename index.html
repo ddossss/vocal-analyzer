@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocal Analyzer</title>
+<style>
+:root{
+  --bg:#0a0c0f; --panel:#12151a; --panel2:#191d24; --line:#252a33;
+  --text:#e8ebf0; --muted:#8891a1; --dim:#4a515d;
+  --accent:#4fd1c5; --accent2:#f6ad55;
+  --good:#68d391; --warn:#f6e05e; --bad:#fc8181;
+  --low:#6b8cff; --mid:#4fd1c5; --high:#f6ad55;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR","Hiragino Sans",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1200px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.brand{display:flex;align-items:center;gap:12px}
+.led{width:10px;height:10px;border-radius:50%;background:#30353e;transition:.2s}
+.led.on{background:var(--good);box-shadow:0 0 12px var(--good)}
+h1{margin:0;font-size:14px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.btn{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+  padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+.btn:hover:not(:disabled){border-color:#3a414d}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:#04211e;border-color:transparent;min-width:130px}
+.btn.primary.stop{background:var(--bad);color:#2b0707}
+.btn.rec.active{background:var(--bad);color:#2b0707;border-color:transparent}
+.btn.small{padding:7px 12px;font-size:12px}
+select,input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit}
+label.inline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+
+.grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px}
+.full{grid-column:1/-1}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+.label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;
+  display:flex;justify-content:space-between;align-items:center;gap:8px}
+.stack{display:flex;flex-direction:column;gap:14px}
+
+/* main readout */
+.readout{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;text-align:center}
+.note{font-size:clamp(84px,15vw,150px);font-weight:800;line-height:.95;letter-spacing:-.02em;transition:color .15s}
+.note .oct{font-size:.42em;font-weight:600;color:var(--muted);margin-left:4px}
+.note.idle{color:var(--dim)}
+.hz{font-family:var(--mono);font-size:clamp(22px,4vw,30px);color:var(--accent);margin-top:8px}
+.hz small{font-size:.55em;color:var(--muted)}
+.cents{font-family:var(--mono);font-size:15px;margin-top:4px;color:var(--muted)}
+.meter{position:relative;width:100%;max-width:540px;height:46px;margin-top:18px}
+.meter .track{position:absolute;left:0;right:0;top:14px;height:16px;border-radius:8px;
+  background:linear-gradient(90deg,rgba(252,129,129,.25),rgba(246,224,94,.18) 30%,rgba(104,211,145,.3) 45%,rgba(104,211,145,.3) 55%,rgba(246,224,94,.18) 70%,rgba(252,129,129,.25))}
+.meter .center{position:absolute;left:50%;top:6px;width:2px;height:32px;background:var(--text);opacity:.5;transform:translateX(-1px)}
+.meter .needle{position:absolute;top:4px;width:4px;height:36px;border-radius:2px;background:var(--good);
+  left:50%;transform:translateX(-2px);transition:left .08s linear,background .15s;box-shadow:0 0 10px currentColor;opacity:0}
+.meter .ticks{position:absolute;left:0;right:0;bottom:-14px;display:flex;justify-content:space-between;font:10px var(--mono);color:var(--dim)}
+.level{width:100%;max-width:540px;margin-top:30px}
+.bar{height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--good),var(--warn) 75%,var(--bad));transition:width .06s}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:var(--muted)}
+
+/* hold */
+.hold{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hold .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+.hold .k{font-size:11px;color:var(--muted)}
+.hold .v{font-size:30px;font-weight:800;margin-top:4px}
+.hold .h{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.hold .up .v{color:var(--high)} .hold .down .v{color:var(--low)}
+.span{font-size:12px;color:var(--muted);margin-top:10px}
+
+/* voice range */
+.vrange{position:relative;height:30px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);margin-top:6px;overflow:hidden}
+.vrange .in{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,rgba(107,140,255,.35),rgba(79,209,197,.35),rgba(246,173,85,.35))}
+.vrange .mark{position:absolute;top:2px;bottom:2px;width:4px;border-radius:2px;background:#fff;transform:translateX(-2px);opacity:0;transition:left .08s linear}
+.vlabels{display:flex;justify-content:space-between;font:11px var(--mono);color:var(--muted);margin-top:6px}
+.pos{font-size:15px;font-weight:600;margin-top:10px}
+
+/* canvases */
+canvas{display:block;width:100%;border-radius:10px;background:#0d1014}
+#hist{height:220px}
+#spec{height:260px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+
+/* tools */
+.tools{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:860px){.tools{grid-template-columns:1fr}}
+.toolrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+audio{width:100%;margin-top:12px;height:40px}
+.rectime{font-family:var(--mono);font-size:22px;margin-left:auto}
+.dots{display:flex;gap:8px;margin-top:14px}
+.dots i{width:22px;height:22px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);transition:background .05s}
+.dots i.on{background:var(--accent)}
+.dots i.on.acc{background:var(--accent2)}
+.bpm{font-family:var(--mono);font-size:30px;font-weight:700;min-width:70px;text-align:center}
+input[type=range]{accent-color:var(--accent);flex:1;min-width:120px}
+.hint{font-size:12px;color:var(--muted);margin-top:16px;line-height:1.6}
+.err{color:var(--bad)}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel2)}
+
+/* judge mode */
+.judge-ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.judge-ctrl input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.judge-main{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:12px;margin-top:14px}
+@media (max-width:860px){.judge-main{grid-template-columns:1fr}}
+.jbox{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;
+  display:flex;flex-direction:column;justify-content:center;min-height:140px}
+.jk{font-size:11px;letter-spacing:.12em;color:var(--muted)}
+.jtarget{font-size:56px;font-weight:800;line-height:1.05;margin-top:4px}
+.jdir{font-size:14px;font-weight:600;margin-top:8px;min-height:20px}
+.jprog{height:10px;border-radius:5px;background:#0d1014;border:1px solid var(--line);overflow:hidden;margin-top:10px}
+.jprog>i{display:block;height:100%;width:0;background:var(--accent);transition:width .05s linear}
+.jflash{font-size:clamp(36px,6vw,58px);font-weight:900;letter-spacing:.06em;color:var(--dim)}
+.jflash.pop{animation:pop .5s ease}
+@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+.jscore{font-size:56px;font-weight:800;font-family:var(--mono);line-height:1.05;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{min-width:54px;padding:6px 8px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);text-align:center;font-size:13px;font-weight:700}
+.chip small{display:block;font:10px var(--mono);color:var(--muted);font-weight:400;margin-top:2px}
+.chip.cur{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.chip.perfect{background:rgba(104,211,145,.22);border-color:var(--good)}
+.chip.great{background:rgba(79,209,197,.2);border-color:var(--accent)}
+.chip.good{background:rgba(246,224,94,.16);border-color:var(--warn)}
+.chip.miss{background:rgba(252,129,129,.16);border-color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="led" id="led"></div>
+      <div>
+        <h1>Vocal Pitch &amp; Frequency Analyzer</h1>
+        <div class="sub" id="status">마이크 시작을 누르면 분석이 시작됩니다</div>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="inline">A4
+        <select id="a4">
+          <option>415</option><option>432</option><option selected>440</option>
+          <option>441</option><option>442</option><option>443</option>
+        </select> Hz
+      </label>
+      <button class="btn primary" id="micBtn">● 마이크 시작</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- Big readout -->
+    <section class="panel readout">
+      <div class="note idle" id="note">—</div>
+      <div class="hz" id="hz">— <small>Hz</small></div>
+      <div class="cents" id="cents">음정 오차 — cents</div>
+      <div class="meter">
+        <div class="track"></div><div class="center"></div><div class="needle" id="needle"></div>
+        <div class="ticks"><span>-50</span><span>-25</span><span>0</span><span>+25</span><span>+50</span></div>
+      </div>
+      <div class="level">
+        <div class="row"><span>입력 레벨</span><span id="lvlTxt">— dBFS</span></div>
+        <div class="bar"><i id="lvl"></i></div>
+      </div>
+    </section>
+
+    <!-- Side -->
+    <div class="stack">
+      <section class="panel">
+        <div class="label">최고음 / 최저음 기록 <button class="btn small" id="resetHold">초기화</button></div>
+        <div class="hold">
+          <div class="box up"><div class="k">▲ 최고음</div><div class="v" id="maxN">—</div><div class="h" id="maxH">— Hz</div></div>
+          <div class="box down"><div class="k">▼ 최저음</div><div class="v" id="minN">—</div><div class="h" id="minH">— Hz</div></div>
+        </div>
+        <div class="span" id="spanTxt">음역 폭: —</div>
+      </section>
+
+      <section class="panel">
+        <div class="label">성부별 음역 가이드
+          <select id="voice">
+            <option value="soprano">소프라노</option>
+            <option value="mezzo">메조소프라노</option>
+            <option value="alto">알토</option>
+            <option value="tenor" selected>테너</option>
+            <option value="baritone">바리톤</option>
+            <option value="bass">베이스</option>
+          </select>
+        </div>
+        <div class="vrange"><div class="in" id="vIn"></div><div class="mark" id="vMark"></div></div>
+        <div class="vlabels"><span id="vLo">—</span><span id="vHi">—</span></div>
+        <div class="pos" id="vPos">소리를 내면 위치가 표시됩니다</div>
+      </section>
+
+      <section class="panel">
+        <div class="label">울림 분석 (싱어스 포먼트 2.5–3.5kHz)</div>
+        <div class="bar" style="height:12px"><i id="fmt" style="background:linear-gradient(90deg,var(--low),var(--mid),var(--high))"></i></div>
+        <div class="row" style="margin-top:8px"><span id="fmtTxt">—</span><span id="bandTxt">기본음 대역: —</span></div>
+      </section>
+    </div>
+
+    <!-- Judge mode -->
+    <section class="panel full">
+      <div class="label">실시간 판정 모드 <span id="jStatus" style="letter-spacing:0;text-transform:none">대기 중</span></div>
+      <div class="judge-ctrl">
+        <select id="jMode">
+          <option value="single">단일 음</option>
+          <option value="five" selected>5음 워밍업 (도레미파솔파미레도)</option>
+          <option value="scale">장음계 상행</option>
+          <option value="scale2">장음계 상행·하행</option>
+          <option value="arp">아르페지오 (1-3-5-8-5-3-1)</option>
+        </select>
+        <label class="inline">시작음 <select id="jRoot"></select></label>
+        <label class="inline">허용 오차
+          <select id="jTol"><option value="10">±10c 엄격</option><option value="25" selected>±25c 보통</option><option value="50">±50c 입문</option></select>
+        </label>
+        <label class="inline">유지
+          <select id="jHold"><option value="1">1초</option><option value="1.5" selected>1.5초</option><option value="2">2초</option><option value="3">3초</option></select>
+        </label>
+        <label class="inline"><input type="checkbox" id="jAuto" checked> 기준음 자동 재생</label>
+      </div>
+      <div class="judge-ctrl" style="margin-top:10px">
+        <button class="btn primary" id="jStart">▶ 판정 시작</button>
+        <button class="btn" id="jTone">🔊 기준음</button>
+        <button class="btn" id="jSkip" disabled>⏭ 건너뛰기</button>
+      </div>
+      <div class="judge-main">
+        <div class="jbox">
+          <div class="jk">목표 음</div>
+          <div class="jtarget" id="jTarget">—</div>
+          <div class="jdir" id="jDir"></div>
+          <div class="jprog"><i id="jProg"></i></div>
+        </div>
+        <div class="jbox">
+          <div class="jflash" id="jFlash">READY</div>
+          <div class="jdir" id="jDetail" style="color:var(--muted);font-weight:500">시작을 누르고 목표 음을 따라 불러 보세요</div>
+        </div>
+        <div class="jbox">
+          <div class="jk">점수</div>
+          <div class="jscore" id="jScore">—</div>
+          <div class="jdir" id="jSum" style="color:var(--muted);font-weight:500;font-size:12px"></div>
+        </div>
+      </div>
+      <div class="chips" id="jChips"></div>
+    </section>
+
+    <!-- Pitch history -->
+    <section class="panel full">
+      <div class="label">피치 히스토리 (최근 약 8초) <span class="legend"><span style="--c:var(--good)">±10c</span><span style="--c:var(--warn)">±25c</span><span style="--c:var(--bad)">그 이상</span></span></div>
+      <canvas id="hist"></canvas>
+    </section>
+
+    <!-- Spectrum -->
+    <section class="panel full">
+      <div class="label">실시간 주파수 스펙트럼 (FFT · 로그 스케일)
+        <span class="legend">
+          <span style="--c:rgba(107,140,255,.6)">저역 100–200Hz</span>
+          <span style="--c:rgba(79,209,197,.6)">중역 500Hz–2kHz</span>
+          <span style="--c:rgba(246,173,85,.6)">싱어스 포먼트 2.5–3.5kHz</span>
+          <span style="--c:#fff">기본음·배음</span>
+        </span>
+      </div>
+      <canvas id="spec"></canvas>
+    </section>
+
+    <!-- Tools -->
+    <div class="tools full">
+      <section class="panel">
+        <div class="label">녹음 &amp; 다시 듣기</div>
+        <div class="toolrow">
+          <button class="btn rec" id="recBtn" disabled>● 녹음</button>
+          <a class="btn" id="dlBtn" style="display:none;text-decoration:none">⬇ 저장</a>
+          <span class="rectime" id="recTime">00:00</span>
+        </div>
+        <audio id="player" controls style="display:none"></audio>
+        <div class="hint" id="recHint">마이크를 켠 뒤 녹음할 수 있어요.</div>
+      </section>
+
+      <section class="panel">
+        <div class="label">메트로놈</div>
+        <div class="toolrow">
+          <button class="btn" id="metBtn">▶ 시작</button>
+          <button class="btn small" id="bpmDown">−</button>
+          <div class="bpm" id="bpmTxt">90</div>
+          <button class="btn small" id="bpmUp">+</button>
+          <select id="beats"><option value="2">2/4</option><option value="3">3/4</option><option value="4" selected>4/4</option><option value="6">6/8</option></select>
+          <button class="btn small" id="tap">TAP</button>
+        </div>
+        <div class="toolrow" style="margin-top:12px">
+          <span style="font-size:12px;color:var(--muted)">BPM</span>
+          <input type="range" id="bpm" min="40" max="208" value="90">
+          <span style="font-size:12px;color:var(--muted)">볼륨</span>
+          <input type="range" id="vol" min="0" max="100" value="60" style="max-width:110px">
+        </div>
+        <div class="dots" id="dots"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="hint">
+    <kbd>Space</kbd> 마이크 시작/중지 · 정확한 분석을 위해 브라우저의 소음 제거·자동 볼륨을 끈 원음으로 분석합니다.
+    메트로놈을 켜고 노래할 땐 이어폰을 쓰면 클릭음이 분석에 섞이지 않아요.
+    마이크가 안 켜지면 Chrome으로 열거나, https / localhost 주소에서 실행해 주세요.
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const VOICES = { // MIDI numbers
+  soprano:[60,84], mezzo:[57,81], alto:[53,77], tenor:[48,72], baritone:[45,69], bass:[40,64]
+};
+const SPEC_MIN = 50, SPEC_MAX = 8000;
+const HIST_LEN = 480;
+
+let A4 = 440;
+let ctx = null, stream = null, source = null, analyser = null;
+let running = false, raf = 0;
+let timeBuf, freqBuf, yinBuf;
+let recentF = [], silentFrames = 0;
+let stableNote = null, stableCount = 0, maxF = null, minF = null;
+const history = new Array(HIST_LEN).fill(null);
+let fmtSmooth = 0;
+
+/* ---------- helpers ---------- */
+const freqToMidi = f => 69 + 12 * Math.log2(f / A4);
+const midiToFreq = m => A4 * Math.pow(2, (m - 69) / 12);
+const midiName = m => { const r = Math.round(m); return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1); };
+const splitName = m => { const r = Math.round(m); return [NOTE_NAMES[((r % 12) + 12) % 12], Math.floor(r / 12) - 1]; };
+const median = a => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const centsColor = c => Math.abs(c) <= 10 ? '#68d391' : Math.abs(c) <= 25 ? '#f6e05e' : '#fc8181';
+
+function ensureCtx() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+/* ---------- canvas sizing ---------- */
+const histCv = $('hist'), specCv = $('spec');
+const hctx = histCv.getContext('2d'), sctx = specCv.getContext('2d');
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+}
+function resizeAll() { fitCanvas(histCv); fitCanvas(specCv); drawHistory(); if (!running) drawSpectrum(0); }
+new ResizeObserver(resizeAll).observe(document.body);
+
+/* ---------- YIN pitch detection ---------- */
+function detectPitch(buf, sr) {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  const rms = Math.sqrt(sum / buf.length);
+  if (rms < 0.008) return { f: 0, rms, clarity: 0 };
+
+  const tauMin = Math.floor(sr / 1400);   // ~F6
+  const tauMax = Math.floor(sr / 65);     // ~C2
+  const W = buf.length - tauMax;
+  if (!yinBuf || yinBuf.length < tauMax + 2) yinBuf = new Float32Array(tauMax + 2);
+  const d = yinBuf;
+
+  for (let tau = 1; tau <= tauMax; tau++) {
+    let s = 0;
+    for (let j = 0; j < W; j++) { const x = buf[j] - buf[j + tau]; s += x * x; }
+    d[tau] = s;
+  }
+  d[0] = 1;
+  let run = 0;
+  for (let tau = 1; tau <= tauMax; tau++) { run += d[tau]; d[tau] = run ? d[tau] * tau / run : 1; }
+
+  let tau = -1;
+  for (let t = tauMin; t <= tauMax; t++) {
+    if (d[t] < 0.15) { while (t + 1 <= tauMax && d[t + 1] < d[t]) t++; tau = t; break; }
+  }
+  if (tau < 0) return { f: 0, rms, clarity: 0 };
+
+  let better = tau;
+  if (tau > 1 && tau < tauMax) {
+    const a = d[tau - 1], b = d[tau], c = d[tau + 1], den = a + c - 2 * b;
+    if (den !== 0) better = tau + 0.5 * (a - c) / den;
+  }
+  return { f: sr / better, rms, clarity: 1 - d[tau] };
+}
+
+/* ---------- mic start / stop ---------- */
+async function startMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus('이 환경에서는 마이크를 쓸 수 없어요. Chrome 또는 https / localhost에서 열어 주세요.', true); return;
+  }
+  try {
+    ensureCtx();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    source = ctx.createMediaStreamSource(stream);
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.55;
+    analyser.minDecibels = -100; analyser.maxDecibels = -15;
+    source.connect(analyser);
+    timeBuf = new Float32Array(analyser.fftSize);
+    freqBuf = new Float32Array(analyser.frequencyBinCount);
+    running = true;
+    $('micBtn').textContent = '■ 마이크 중지'; $('micBtn').classList.add('stop');
+    $('led').classList.add('on'); $('recBtn').disabled = false;
+    $('recHint').textContent = '녹음 버튼을 누르면 지금 들리는 소리를 그대로 녹음해요.';
+    setStatus(`분석 중 · 샘플레이트 ${ctx.sampleRate}Hz`);
+    loop();
+  } catch (e) {
+    setStatus('마이크 권한이 거부되었거나 장치를 찾을 수 없어요. 브라우저 주소창의 마이크 권한을 확인해 주세요.', true);
+  }
+}
+function stopMic() {
+  running = false; cancelAnimationFrame(raf);
+  if (judge.on) stopJudge('마이크가 꺼져서 판정을 멈췄어요');
+  if (recorder && recorder.state === 'recording') recorder.stop();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (source) source.disconnect();
+  stream = source = analyser = null;
+  $('micBtn').textContent = '● 마이크 시작'; $('micBtn').classList.remove('stop');
+  $('led').classList.remove('on'); $('recBtn').disabled = true;
+  recentF = []; showPitch(0, false);
+  $('lvl').style.width = '0%'; $('lvlTxt').textContent = '— dBFS';
+  setStatus('중지됨 · 기록은 유지됩니다');
+  drawSpectrum(0);
+}
+function setStatus(msg, err) { const s = $('status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+
+$('micBtn').onclick = () => running ? stopMic() : startMic();
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !['INPUT','SELECT','BUTTON','AUDIO'].includes(document.activeElement.tagName)) {
+    e.preventDefault(); running ? stopMic() : startMic();
+  }
+});
+$('a4').onchange = e => { A4 = +e.target.value; updateVoiceRange(); };
+
+/* ---------- main loop ---------- */
+function loop() {
+  if (!running) return;
+  raf = requestAnimationFrame(loop);
+  analyser.getFloatTimeDomainData(timeBuf);
+  analyser.getFloatFrequencyData(freqBuf);
+
+  const r = detectPitch(timeBuf, ctx.sampleRate);
+  const db = 20 * Math.log10(Math.max(r.rms, 1e-6));
+  $('lvl').style.width = clamp((db + 60) / 60 * 100, 0, 100) + '%';
+  $('lvlTxt').textContent = (db < -90 ? '-∞' : db.toFixed(1)) + ' dBFS';
+
+  const voiced = r.f > 0 && r.clarity > 0.8;
+  if (voiced) { recentF.push(r.f); if (recentF.length > 5) recentF.shift(); silentFrames = 0; }
+  else if (++silentFrames > 8) recentF = [];
+
+  const f = recentF.length ? median(recentF) : 0;
+  showPitch(f, voiced);
+
+  history.push(voiced && f ? freqToMidi(f) : null);
+  if (history.length > HIST_LEN) history.shift();
+
+  if (voiced && f) trackHold(f);
+  judgeTick(voiced ? f : 0);
+  updateFormant(voiced);
+  drawHistory();
+  drawSpectrum(voiced ? f : 0);
+}
+
+/* ---------- readouts ---------- */
+function showPitch(f, live) {
+  const noteEl = $('note'), needle = $('needle');
+  if (!f) {
+    noteEl.innerHTML = '—'; noteEl.classList.add('idle'); noteEl.style.color = '';
+    $('hz').innerHTML = '— <small>Hz</small>'; $('cents').textContent = '음정 오차 — cents';
+    needle.style.opacity = 0; $('vMark').style.opacity = 0;
+    $('vPos').textContent = '소리를 내면 위치가 표시됩니다'; $('bandTxt').textContent = '기본음 대역: —';
+    return;
+  }
+  const m = freqToMidi(f), cents = Math.round((m - Math.round(m)) * 100);
+  const [n, o] = splitName(m);
+  noteEl.innerHTML = `${n}<span class="oct">${o}</span>`;
+  noteEl.classList.toggle('idle', !live);
+  noteEl.style.color = live ? centsColor(cents) : '';
+  $('hz').innerHTML = `${f.toFixed(1)} <small>Hz</small>`;
+  $('cents').textContent = `음정 오차 ${cents > 0 ? '+' : ''}${cents} cents · 목표 ${midiToFreq(Math.round(m)).toFixed(1)}Hz`;
+  needle.style.opacity = live ? 1 : .35;
+  needle.style.left = (50 + clamp(cents, -50, 50)) + '%';
+  needle.style.background = centsColor(cents); needle.style.color = centsColor(cents);
+
+  // voice range position
+  const [lo, hi] = VOICES[$('voice').value];
+  const vmin = lo - 6, vmax = hi + 6;
+  const mk = $('vMark');
+  mk.style.opacity = 1; mk.style.left = clamp((m - vmin) / (vmax - vmin) * 100, 0, 100) + '%';
+  let pos;
+  if (m < lo - .5) pos = '▼ 음역 아래 (무리하지 마세요)';
+  else if (m > hi + .5) pos = '▲ 음역 위 (무리하지 마세요)';
+  else { const t = (m - lo) / (hi - lo); pos = t < 1/3 ? '하단 음역 · 흉성 중심' : t < 2/3 ? '중간 음역 · 믹스 구간' : '상단 음역 · 두성/헤드 쪽'; }
+  $('vPos').textContent = pos;
+
+  $('bandTxt').textContent = '기본음 대역: ' + (f < 200 ? '저역 (100–200Hz 부근)' : f < 500 ? '중저역 (200–500Hz)' : f < 2000 ? '중역 (500Hz–2kHz)' : '고역');
+}
+
+function trackHold(f) {
+  const n = Math.round(freqToMidi(f));
+  if (n === stableNote) stableCount++; else { stableNote = n; stableCount = 1; }
+  if (stableCount < 5) return;
+  let changed = false;
+  if (maxF === null || f > maxF) { maxF = f; changed = true; }
+  if (minF === null || f < minF) { minF = f; changed = true; }
+  if (changed) renderHold();
+}
+function renderHold() {
+  if (maxF === null) {
+    $('maxN').textContent = $('minN').textContent = '—';
+    $('maxH').textContent = $('minH').textContent = '— Hz';
+    $('spanTxt').textContent = '음역 폭: —'; return;
+  }
+  $('maxN').textContent = midiName(freqToMidi(maxF)); $('maxH').textContent = maxF.toFixed(1) + ' Hz';
+  $('minN').textContent = midiName(freqToMidi(minF)); $('minH').textContent = minF.toFixed(1) + ' Hz';
+  const semis = Math.round(freqToMidi(maxF)) - Math.round(freqToMidi(minF));
+  const oct = Math.floor(semis / 12), rest = semis % 12;
+  $('spanTxt').textContent = `음역 폭: ${semis}반음` + (semis ? ` (${oct ? oct + '옥타브 ' : ''}${rest ? rest + '반음' : ''})`.replace(' )', ')') : '');
+}
+$('resetHold').onclick = () => { maxF = minF = null; stableNote = null; stableCount = 0; renderHold(); };
+
+function updateFormant(voiced) {
+  let total = 0, band = 0;
+  if (voiced) {
+    const binHz = ctx.sampleRate / analyser.fftSize;
+    for (let i = 1; i < freqBuf.length; i++) {
+      const hz = i * binHz; if (hz < 80) continue; if (hz > 5000) break;
+      const p = Math.pow(10, freqBuf[i] / 10);
+      total += p; if (hz >= 2500 && hz <= 3500) band += p;
+    }
+  }
+  let pct = 0;
+  if (voiced && total > 0 && band > 0) pct = clamp((10 * Math.log10(band / total) + 32) / 26 * 100, 0, 100);
+  fmtSmooth = voiced ? fmtSmooth * .8 + pct * .2 : fmtSmooth * .9;
+  $('fmt').style.width = fmtSmooth + '%';
+  $('fmtTxt').textContent = !voiced && fmtSmooth < 2 ? '—' :
+    fmtSmooth < 33 ? '울림 약함 · 공명이 앞으로 덜 나와요' : fmtSmooth < 66 ? '울림 보통' : '울림 강함 · 소리가 멀리 뻗어요';
+}
+
+/* ---------- voice range ---------- */
+function updateVoiceRange() {
+  const [lo, hi] = VOICES[$('voice').value];
+  const vmin = lo - 6, vmax = hi + 6;
+  $('vIn').style.left = ((lo - vmin) / (vmax - vmin) * 100) + '%';
+  $('vIn').style.width = ((hi - lo) / (vmax - vmin) * 100) + '%';
+  $('vLo').textContent = `${midiName(lo)} · ${midiToFreq(lo).toFixed(0)}Hz`;
+  $('vHi').textContent = `${midiName(hi)} · ${midiToFreq(hi).toFixed(0)}Hz`;
+  drawHistory();
+}
+$('voice').onchange = () => { updateVoiceRange(); if (!judge.on) setDefaultRoot(); };
+
+/* ---------- judge mode ---------- */
+const SEQS = {
+  single: [0], five: [0,2,4,5,7,5,4,2,0], scale: [0,2,4,5,7,9,11,12],
+  scale2: [0,2,4,5,7,9,11,12,11,9,7,5,4,2,0], arp: [0,4,7,12,7,4,0]
+};
+const GRADES = {
+  perfect: { t: 'PERFECT', c: '#68d391', p: 100 },
+  great:   { t: 'GREAT',   c: '#4fd1c5', p: 85 },
+  good:    { t: 'GOOD',    c: '#f6e05e', p: 70 },
+  miss:    { t: 'MISS',    c: '#fc8181', p: 0 }
+};
+const judge = { on: false, seq: [], idx: 0, tol: 25, hold: 1.5, inTime: 0, devs: [], results: [], muteUntil: 0, lastTs: 0, toneTimer: 0 };
+
+function buildRootOptions() {
+  const sel = $('jRoot'); sel.innerHTML = '';
+  for (let m = 36; m <= 72; m++) { const o = document.createElement('option'); o.value = m; o.textContent = midiName(m); sel.appendChild(o); }
+}
+function setDefaultRoot() { const [lo] = VOICES[$('voice').value]; $('jRoot').value = Math.floor((lo + 8) / 12) * 12; }
+
+function playTone(midi, dur = 1) {
+  ensureCtx();
+  const t = ctx.currentTime + 0.02;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'triangle'; o.frequency.value = midiToFreq(midi);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.25, t + 0.03);
+  g.gain.setValueAtTime(0.25, t + dur - 0.15);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + dur + 0.02);
+  // ignore the mic while the reference tone sounds, so the speaker isn't judged
+  judge.muteUntil = performance.now() + (dur + 0.25) * 1000;
+}
+
+function renderChips() {
+  const box = $('jChips'); box.innerHTML = '';
+  judge.seq.forEach((m, i) => {
+    const r = judge.results[i], c = document.createElement('div');
+    c.className = 'chip' + (r ? ' ' + r.grade : '') + (judge.on && i === judge.idx ? ' cur' : '');
+    c.innerHTML = midiName(m) + `<small>${r ? (r.grade === 'miss' ? 'MISS' : (r.mean > 0 ? '+' : '') + Math.round(r.mean) + 'c') : '·'}</small>`;
+    box.appendChild(c);
+  });
+}
+function showTarget() {
+  const m = judge.seq[judge.idx];
+  $('jTarget').textContent = midiName(m);
+  $('jStatus').textContent = `${judge.idx + 1} / ${judge.seq.length} · ${midiToFreq(m).toFixed(1)}Hz`;
+  $('jProg').style.width = '0%'; $('jDir').textContent = '';
+  renderChips(); drawHistory();
+}
+function resetNote() { judge.inTime = 0; judge.devs = []; }
+function updateScore() {
+  if (!judge.results.length) { $('jScore').textContent = '—'; return; }
+  const s = judge.results.reduce((a, r) => a + GRADES[r.grade].p, 0) / judge.results.length;
+  $('jScore').textContent = Math.round(s);
+}
+function flash(gradeKey, detail) {
+  const el = $('jFlash'), g = GRADES[gradeKey];
+  el.textContent = g.t; el.style.color = g.c;
+  el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+  $('jDetail').textContent = detail;
+}
+
+async function startJudge() {
+  if (!running) { await startMic(); if (!running) return; }
+  judge.seq = SEQS[$('jMode').value].map(i => +$('jRoot').value + i);
+  judge.tol = +$('jTol').value; judge.hold = +$('jHold').value;
+  judge.idx = 0; judge.results = []; resetNote();
+  judge.on = true; judge.lastTs = performance.now(); judge.muteUntil = 0;
+  $('jStart').textContent = '■ 판정 종료'; $('jStart').classList.add('stop'); $('jSkip').disabled = false;
+  const fl = $('jFlash'); fl.textContent = 'GO'; fl.style.color = 'var(--text)';
+  $('jDetail').textContent = `목표 음을 ±${judge.tol}c 안에서 ${judge.hold}초 유지하면 판정돼요`;
+  $('jSum').textContent = ''; updateScore(); showTarget();
+  if ($('jAuto').checked) playTone(judge.seq[0]);
+}
+function stopJudge(msg) {
+  judge.on = false; clearTimeout(judge.toneTimer);
+  $('jStart').textContent = '▶ 판정 시작'; $('jStart').classList.remove('stop'); $('jSkip').disabled = true;
+  $('jProg').style.width = '0%'; $('jDir').textContent = '';
+  $('jStatus').textContent = msg || '대기 중';
+  renderChips(); drawHistory();
+}
+
+function finishNote(skipped) {
+  const m = judge.seq[judge.idx];
+  let res;
+  if (skipped || !judge.devs.length) {
+    res = { midi: m, grade: 'miss', abs: null, mean: 0 };
+    flash('miss', `${midiName(m)} 건너뜀`);
+  } else {
+    const n = judge.devs.length;
+    const abs = judge.devs.reduce((a, b) => a + Math.abs(b), 0) / n;
+    const mean = judge.devs.reduce((a, b) => a + b, 0) / n;
+    const grade = abs <= Math.min(7, judge.tol * .4) ? 'perfect' : abs <= Math.min(15, judge.tol * .7) ? 'great' : 'good';
+    res = { midi: m, grade, abs, mean };
+    const tend = mean > 4 ? '살짝 높게(샤프) 들어갔어요' : mean < -4 ? '살짝 낮게(플랫) 들어갔어요' : '음정 중심이 정확해요';
+    flash(grade, `${midiName(m)} · 평균 오차 ${abs.toFixed(0)}c · ${tend}`);
+  }
+  judge.results.push(res); updateScore();
+  judge.idx++; resetNote();
+
+  if (judge.idx >= judge.seq.length) { finishSession(); return; }
+  showTarget();
+  judge.muteUntil = performance.now() + 450;   // short breath before the next note
+  if ($('jAuto').checked) {
+    const next = judge.seq[judge.idx];
+    judge.toneTimer = setTimeout(() => { if (judge.on) playTone(next); }, 450);
+  }
+}
+function finishSession() {
+  const cnt = k => judge.results.filter(r => r.grade === k).length;
+  const sung = judge.results.filter(r => r.grade !== 'miss');
+  const mean = sung.length ? sung.reduce((a, r) => a + r.mean, 0) / sung.length : 0;
+  const tend = !sung.length ? '' : mean > 4 ? ' · 전체적으로 높게 부르는 경향' : mean < -4 ? ' · 전체적으로 낮게 부르는 경향' : ' · 높낮이 치우침 없음';
+  $('jSum').textContent = `Perfect ${cnt('perfect')} · Great ${cnt('great')} · Good ${cnt('good')} · Miss ${cnt('miss')}${tend}`;
+  $('jTarget').textContent = '완료';
+  stopJudge('세션 완료 · 다시 시작할 수 있어요');
+}
+
+function judgeTick(f) {
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - judge.lastTs) / 1000); judge.lastTs = now;
+  if (!judge.on || judge.idx >= judge.seq.length) return;
+  const dir = $('jDir');
+  if (now < judge.muteUntil) { dir.textContent = '🔊 기준음 듣기'; dir.style.color = 'var(--muted)'; return; }
+
+  const target = judge.seq[judge.idx];
+  if (f) {
+    const dev = (freqToMidi(f) - target) * 100;
+    if (Math.abs(dev) <= judge.tol) {
+      judge.inTime += dt; judge.devs.push(dev);
+      dir.textContent = '● 좋아요, 그대로 유지!'; dir.style.color = 'var(--good)';
+    } else {
+      judge.inTime = Math.max(0, judge.inTime - dt * .5);
+      if (judge.inTime === 0) judge.devs = [];
+      const semis = Math.abs(dev) / 100, octOff = Math.round(dev / 1200);
+      if (octOff !== 0 && Math.abs(dev - octOff * 1200) <= judge.tol) {
+        dir.textContent = `옥타브가 달라요 · ${octOff > 0 ? '↓ 1옥타브 낮게' : '↑ 1옥타브 높게'}`;
+      } else {
+        const amt = semis >= 1 ? `${Math.round(semis)}반음` : `${Math.round(Math.abs(dev))}c`;
+        dir.textContent = dev < 0 ? `↑ 더 높게 (${amt})` : `↓ 더 낮게 (${amt})`;
+      }
+      dir.style.color = 'var(--warn)';
+    }
+  } else {
+    judge.inTime = Math.max(0, judge.inTime - dt * .5);
+    dir.textContent = '소리를 내 주세요'; dir.style.color = 'var(--muted)';
+  }
+  $('jProg').style.width = clamp(judge.inTime / judge.hold * 100, 0, 100) + '%';
+  if (judge.inTime >= judge.hold) finishNote(false);
+}
+
+$('jStart').onclick = () => judge.on ? stopJudge('판정을 멈췄어요') : startJudge();
+$('jSkip').onclick = () => { if (judge.on) finishNote(true); };
+$('jTone').onclick = () => playTone(judge.on ? judge.seq[judge.idx] : +$('jRoot').value);
+
+/* ---------- pitch history canvas ---------- */
+function drawHistory() {
+  const W = histCv.width, H = histCv.height, dpr = window.devicePixelRatio || 1;
+  if (!W) return;
+  const [lo, hi] = VOICES[$('voice').value];
+  const mMin = lo - 5, mMax = hi + 5;
+  const padL = 44 * dpr;
+  const y = m => H - (m - mMin) / (mMax - mMin) * H;
+  hctx.clearRect(0, 0, W, H);
+
+  // voice range band
+  hctx.fillStyle = 'rgba(79,209,197,.06)';
+  hctx.fillRect(padL, y(hi), W - padL, y(lo) - y(hi));
+
+  // judge target band
+  if (judge.on && judge.idx < judge.seq.length) {
+    const t = judge.seq[judge.idx], tol = judge.tol / 100;
+    const yt = y(clamp(t, mMin, mMax));
+    hctx.fillStyle = 'rgba(255,255,255,.09)';
+    hctx.fillRect(padL, y(t + tol), W - padL, y(t - tol) - y(t + tol));
+    hctx.strokeStyle = 'rgba(255,255,255,.7)'; hctx.lineWidth = 1.5 * dpr; hctx.setLineDash([6 * dpr, 4 * dpr]);
+    hctx.beginPath(); hctx.moveTo(padL, yt); hctx.lineTo(W, yt); hctx.stroke();
+    hctx.setLineDash([]); hctx.lineWidth = 1;
+  }
+
+  // semitone grid
+  hctx.font = `${10 * dpr}px ui-monospace,Menlo,monospace`; hctx.textBaseline = 'middle';
+  for (let m = Math.ceil(mMin); m <= mMax; m++) {
+    const yy = Math.round(y(m)) + .5, pc = ((m % 12) + 12) % 12;
+    const isC = pc === 0, natural = [0,2,4,5,7,9,11].includes(pc);
+    hctx.strokeStyle = isC ? 'rgba(255,255,255,.16)' : natural ? 'rgba(255,255,255,.06)' : 'rgba(255,255,255,.025)';
+    hctx.beginPath(); hctx.moveTo(padL, yy); hctx.lineTo(W, yy); hctx.stroke();
+    if (natural) { hctx.fillStyle = isC ? '#c9ced8' : '#5a616d'; hctx.fillText(midiName(m), 6 * dpr, yy); }
+  }
+
+  // trace
+  const step = (W - padL) / (HIST_LEN - 1);
+  hctx.lineWidth = 3 * dpr; hctx.lineCap = 'round';
+  for (let i = 1; i < HIST_LEN; i++) {
+    const a = history[i - 1], b = history[i];
+    if (a === null || b === null || Math.abs(a - b) > 2) continue;
+    const c = (b - Math.round(b)) * 100;
+    hctx.strokeStyle = centsColor(c);
+    hctx.beginPath();
+    hctx.moveTo(padL + (i - 1) * step, y(clamp(a, mMin, mMax)));
+    hctx.lineTo(padL + i * step, y(clamp(b, mMin, mMax)));
+    hctx.stroke();
+  }
+  const last = history[HIST_LEN - 1];
+  if (last !== null) {
+    hctx.fillStyle = '#fff'; hctx.beginPath();
+    hctx.arc(W - 4 * dpr, y(clamp(last, mMin, mMax)), 4 * dpr, 0, Math.PI * 2); hctx.fill();
+  }
+}
+
+/* ---------- spectrum canvas ---------- */
+const xOfHz = (hz, W, padL) => padL + Math.log(hz / SPEC_MIN) / Math.log(SPEC_MAX / SPEC_MIN) * (W - padL);
+function drawSpectrum(f0) {
+  const W = specCv.width, H = specCv.height, dpr = window.devicePixelRatio || 1;
+  if (!W) return;
+  const padL = 4 * dpr, padB = 20 * dpr, plotH = H - padB;
+  sctx.clearRect(0, 0, W, H);
+
+  // band shading
+  const bands = [[100,200,'rgba(107,140,255,.10)'],[500,2000,'rgba(79,209,197,.08)'],[2500,3500,'rgba(246,173,85,.13)']];
+  for (const [a, b, c] of bands) { sctx.fillStyle = c; const x1 = xOfHz(a, W, padL), x2 = xOfHz(b, W, padL); sctx.fillRect(x1, 0, x2 - x1, plotH); }
+
+  // grid
+  sctx.font = `${10 * dpr}px ui-monospace,Menlo,monospace`; sctx.textAlign = 'center'; sctx.textBaseline = 'top';
+  for (const hz of [50,100,200,300,500,1000,2000,3000,5000,8000]) {
+    const x = Math.round(xOfHz(hz, W, padL)) + .5;
+    sctx.strokeStyle = 'rgba(255,255,255,.06)'; sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, plotH); sctx.stroke();
+    sctx.fillStyle = '#5a616d'; sctx.fillText(hz >= 1000 ? hz / 1000 + 'k' : hz, clamp(x, 12 * dpr, W - 12 * dpr), plotH + 5 * dpr);
+  }
+
+  if (analyser && running) {
+    const binHz = ctx.sampleRate / analyser.fftSize;
+    const barW = 3 * dpr, gap = 1 * dpr;
+    const grad = sctx.createLinearGradient(padL, 0, W, 0);
+    grad.addColorStop(0, '#6b8cff'); grad.addColorStop(.45, '#4fd1c5'); grad.addColorStop(.75, '#f6ad55'); grad.addColorStop(1, '#fc8181');
+    sctx.fillStyle = grad;
+    const logSpan = Math.log(SPEC_MAX / SPEC_MIN);
+    for (let x = padL; x < W; x += barW + gap) {
+      const h1 = SPEC_MIN * Math.exp((x - padL) / (W - padL) * logSpan);
+      const h2 = SPEC_MIN * Math.exp((x + barW - padL) / (W - padL) * logSpan);
+      let i1 = Math.floor(h1 / binHz), i2 = Math.max(i1, Math.floor(h2 / binHz));
+      let mx = -200;
+      for (let i = i1; i <= i2 && i < freqBuf.length; i++) if (freqBuf[i] > mx) mx = freqBuf[i];
+      const v = clamp((mx - analyser.minDecibels) / (analyser.maxDecibels - analyser.minDecibels), 0, 1);
+      const h = v * plotH;
+      if (h > 0) sctx.fillRect(x, plotH - h, barW, h);
+    }
+  }
+
+  // fundamental + harmonics markers
+  if (f0) {
+    for (let k = 1; k * f0 <= SPEC_MAX; k++) {
+      const x = xOfHz(k * f0, W, padL);
+      sctx.strokeStyle = k === 1 ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.22)';
+      sctx.lineWidth = (k === 1 ? 2 : 1) * dpr;
+      sctx.setLineDash(k === 1 ? [] : [4 * dpr, 4 * dpr]);
+      sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, plotH); sctx.stroke();
+      if (k <= 6) { sctx.fillStyle = k === 1 ? '#fff' : '#8891a1'; sctx.textBaseline = 'top'; sctx.fillText(k === 1 ? 'F0' : 'H' + k, x, 4 * dpr); }
+    }
+    sctx.setLineDash([]); sctx.lineWidth = 1;
+  }
+}
+
+/* ---------- recording ---------- */
+let recorder = null, chunks = [], recUrl = null, recStart = 0, recTimer = 0;
+const fmtTime = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+$('recBtn').onclick = () => {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  if (!stream) return;
+  if (!window.MediaRecorder) { $('recHint').textContent = '이 브라우저는 녹음을 지원하지 않아요.'; return; }
+  const mime = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  chunks = [];
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    clearInterval(recTimer);
+    const type = recorder.mimeType || mime || 'audio/webm';
+    const blob = new Blob(chunks, { type });
+    if (recUrl) URL.revokeObjectURL(recUrl);
+    recUrl = URL.createObjectURL(blob);
+    const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+    const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
+    $('player').src = recUrl; $('player').style.display = 'block';
+    $('dlBtn').href = recUrl; $('dlBtn').download = `vocal_${stamp}.${ext}`; $('dlBtn').style.display = 'inline-block';
+    $('recBtn').textContent = '● 녹음'; $('recBtn').classList.remove('active');
+    $('recHint').textContent = '재생해서 들어보고, 필요하면 저장하세요. 다시 녹음하면 덮어씁니다.';
+  };
+  recorder.start(250);
+  recStart = performance.now();
+  $('recTime').textContent = '00:00';
+  recTimer = setInterval(() => { $('recTime').textContent = fmtTime((performance.now() - recStart) / 1000); }, 250);
+  $('recBtn').textContent = '■ 녹음 중지'; $('recBtn').classList.add('active');
+  $('recHint').textContent = '녹음 중…';
+};
+
+/* ---------- metronome ---------- */
+let metroOn = false, metroTimer = 0, nextTime = 0, beatIdx = 0, bpm = 90, beatsPerBar = 4, queue = [], metroRaf = 0, taps = [];
+function buildDots() {
+  $('dots').innerHTML = '';
+  for (let i = 0; i < beatsPerBar; i++) { const d = document.createElement('i'); if (i === 0) d.classList.add('acc'); $('dots').appendChild(d); }
+}
+function setBpm(v) { bpm = clamp(Math.round(v), 40, 208); $('bpm').value = bpm; $('bpmTxt').textContent = bpm; }
+function click(time, accent) {
+  const vol = $('vol').value / 100; if (vol <= 0) return;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'square'; o.frequency.value = accent ? 1760 : 1100;
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(0.35 * vol * (accent ? 1 : .6) + 0.0001, time + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+  o.connect(g).connect(ctx.destination); o.start(time); o.stop(time + 0.06);
+}
+function scheduler() {
+  while (nextTime < ctx.currentTime + 0.12) {
+    click(nextTime, beatIdx === 0);
+    queue.push({ beat: beatIdx, time: nextTime });
+    // 6/8: eighth-note pulses at the given BPM
+    nextTime += 60 / bpm;
+    beatIdx = (beatIdx + 1) % beatsPerBar;
+  }
+}
+function metroVisual() {
+  if (!metroOn) return;
+  metroRaf = requestAnimationFrame(metroVisual);
+  let cur = null;
+  while (queue.length && queue[0].time <= ctx.currentTime) cur = queue.shift();
+  if (cur) {
+    [...$('dots').children].forEach((d, i) => d.classList.toggle('on', i === cur.beat));
+    setTimeout(() => { const d = $('dots').children[cur.beat]; if (d) d.classList.remove('on'); }, 110);
+  }
+}
+$('metBtn').onclick = () => {
+  if (metroOn) {
+    metroOn = false; clearInterval(metroTimer); cancelAnimationFrame(metroRaf); queue = [];
+    $('metBtn').textContent = '▶ 시작'; [...$('dots').children].forEach(d => d.classList.remove('on')); return;
+  }
+  ensureCtx(); metroOn = true; beatIdx = 0; queue = [];
+  nextTime = ctx.currentTime + 0.06;
+  metroTimer = setInterval(scheduler, 25); scheduler(); metroVisual();
+  $('metBtn').textContent = '■ 정지';
+};
+$('bpm').oninput = e => setBpm(+e.target.value);
+$('bpmUp').onclick = () => setBpm(bpm + 1);
+$('bpmDown').onclick = () => setBpm(bpm - 1);
+$('beats').onchange = e => { beatsPerBar = +e.target.value; beatIdx = 0; buildDots(); };
+$('tap').onclick = () => {
+  const now = performance.now();
+  taps = taps.filter(t => now - t < 2500); taps.push(now);
+  if (taps.length >= 2) { const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1); setBpm(60000 / iv); }
+};
+
+/* ---------- init ---------- */
+buildDots(); buildRootOptions(); setDefaultRoot(); updateVoiceRange(); resizeAll();
+})();
+</script>
+</body>
+</html>
